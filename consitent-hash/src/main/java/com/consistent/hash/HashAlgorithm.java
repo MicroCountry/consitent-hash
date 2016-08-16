@@ -1,0 +1,137 @@
+package com.consistent.hash;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.List;
+import java.util.SortedMap;
+import java.util.TreeMap;
+
+public class HashAlgorithm<S> {
+		private TreeMap<Long, S> nodes; // 虚拟节点
+		private List<S> shards; // 真实机器节点
+		private List<S> backup;
+		private final int NODE_NUM = 100; // 每个机器节点关联的虚拟节点个数
+		
+		public List<S> getBackup() {
+			return backup;
+		}
+
+		public void setBackup(List<S> backup) {
+			this.backup = backup;
+		}
+
+		public TreeMap<Long, S> getNodes() {
+			return nodes;
+		}
+
+		public void setNodes(TreeMap<Long, S> nodes) {
+			this.nodes = nodes;
+		}
+
+		public List<S> getShards() {
+			return shards;
+		}
+
+		public void setShards(List<S> shards) {
+			this.shards = shards;
+		}
+
+		public HashAlgorithm(List<S> shards,List<S> backup) {
+			super();
+			this.shards = shards;
+			this.backup = backup;
+			init();
+		}
+
+		private void init() { // 初始化一致性hash环
+			nodes = new TreeMap<Long, S>();
+			for (int i = 0; i != shards.size(); ++i) { // 每个真实机器节点都需要关联虚拟节点
+				final S shardInfo = shards.get(i);
+
+				for (int n = 0; n < NODE_NUM; n++)
+					// 一个真实机器节点关联NODE_NUM个虚拟节点
+					nodes.put(hash(shardInfo.toString() + n), shardInfo);
+
+			}
+		}
+
+		public S getShardInfo(String key) {
+			SortedMap<Long, S> tail = nodes.tailMap(hash(key)); // 沿环的顺时针找到一个虚拟节点
+			if (tail.size() == 0) {
+				return nodes.get(nodes.firstKey());
+			}
+			return tail.get(tail.firstKey()); // 返回该虚拟节点对应的真实机器节点的信息
+		}
+		
+		public void add(S node){//增加节点
+			shards.add(node);//增加真实节点
+			for (int n = 0; n < NODE_NUM; n++)
+				// 一个真实机器节点关联NODE_NUM个虚拟节点
+				nodes.put(hash(node.toString() + n), node);
+		}
+		
+		public void remove(S node){
+			shards.remove(node);
+			for (int n = 0; n < NODE_NUM; n++)
+				// 一个真实机器节点关联NODE_NUM个虚拟节点
+				nodes.remove(hash(node.toString() + n), node);
+		}
+		
+		public void removeBackup(S node){
+			backup.remove(node);
+		}
+		
+		public void addBackup(S node){
+			backup.add(node);
+		}
+
+		/**
+		 *  MurMurHash算法，是非加密HASH算法，性能很高，
+		 *  比传统的CRC32,MD5，SHA-1（这两个算法都是加密HASH算法，复杂度本身就很高，带来的性能上的损害也不可避免）
+		 *  等HASH算法要快很多，而且据说这个算法的碰撞率很低.
+		 *  http://murmurhash.googlepages.com/
+		 */
+		private Long hash(String key) {
+			
+			ByteBuffer buf = ByteBuffer.wrap(key.getBytes());
+			int seed = 0x1234ABCD;
+			
+			ByteOrder byteOrder = buf.order();
+	        buf.order(ByteOrder.LITTLE_ENDIAN);
+
+	        long m = 0xc6a4a7935bd1e995L;
+	        int r = 47;
+
+	        long h = seed ^ (buf.remaining() * m);
+
+	        long k;
+	        while (buf.remaining() >= 8) {
+	            k = buf.getLong();
+
+	            k *= m;
+	            k ^= k >>> r;
+	            k *= m;
+
+	            h ^= k;
+	            h *= m;
+	        }
+
+	        if (buf.remaining() > 0) {
+	            ByteBuffer finish = ByteBuffer.allocate(8).order(
+	                    ByteOrder.LITTLE_ENDIAN);
+	            // for big-endian version, do this first:
+	            // finish.position(8-buf.remaining());
+	            finish.put(buf).rewind();
+	            h ^= finish.getLong();
+	            h *= m;
+	        }
+
+	        h ^= h >>> r;
+	        h *= m;
+	        h ^= h >>> r;
+
+	        buf.order(byteOrder);
+	        return h;
+		}
+
+}
